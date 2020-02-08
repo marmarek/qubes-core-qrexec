@@ -985,6 +985,10 @@ _Noreturn void usage(const char *argv0)
     exit(1);
 }
 
+void sigterm_handler(int UNUSED(sig)) {
+    exit(0);
+}
+
 int main(int argc, char **argv)
 {
     fd_set read_fdset, write_fdset;
@@ -1022,6 +1026,7 @@ int main(int argc, char **argv)
     sigemptyset(&chld_set);
     sigaddset(&chld_set, SIGCHLD);
     signal(SIGCHLD, sigchld_handler);
+    signal(SIGTERM, sigterm_handler);
     /*
      * The main event loop. Waits for one of the following events:
      * - message from client
