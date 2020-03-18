@@ -44,17 +44,24 @@ void register_exec_func(do_exec_t *func) {
     exec_func = func;
 }
 
-void exec_qubes_rpc_if_requested(char *prog, char *const envp[]) {
+void exec_qubes_rpc_if_requested(const char *prog, char *const envp[]) {
     /* avoid calling qubes-rpc-multiplexer through shell */
     if (strncmp(prog, RPC_REQUEST_COMMAND, RPC_REQUEST_COMMAND_LEN) == 0) {
+        char *prog_copy;
         char *tok, *savetok;
         char *argv[16]; // right now 6 are used, but allow future extensions
         size_t i = 0;
 
-        tok=strtok_r(prog, " ", &savetok);
+        prog_copy = strdup(prog);
+        if (!prog_copy) {
+            PERROR("strdup");
+            _exit(1);
+        }
+
+        tok=strtok_r(prog_copy, " ", &savetok);
         do {
             if (i >= sizeof(argv)/sizeof(argv[0])-1) {
-                fprintf(stderr, "To many arguments to %s\n", RPC_REQUEST_COMMAND);
+                LOG(ERROR, "To many arguments to %s", RPC_REQUEST_COMMAND);
                 exit(1);
             }
             argv[i++] = tok;
@@ -65,7 +72,7 @@ void exec_qubes_rpc_if_requested(char *prog, char *const envp[]) {
         if (!argv[0])
             argv[0] = QUBES_RPC_MULTIPLEXER_PATH;
         execve(argv[0], argv, envp);
-        perror("exec qubes-rpc-multiplexer");
+        PERROR("exec qubes-rpc-multiplexer");
         _exit(126);
     }
 }
@@ -77,19 +84,19 @@ void fix_fds(int fdin, int fdout, int fderr)
         if (i != fdin && i != fdout && i != fderr)
             close(i);
     if (dup2(fdin, 0) < 0 || dup2(fdout, 1) < 0 || dup2(fderr, 2) < 0) {
-        perror("dup2");
+        PERROR("dup2");
         abort();
     }
 
     if (close(fdin) || (fdin != fdout && close(fdout)) ||
         (fdin != fderr && fdout != fderr && fderr != 2 && close(fderr))) {
-        perror("close");
+        PERROR("close");
         abort();
     }
 }
 
 static int do_fork_exec(const char *user,
-        char *cmdline,
+        const char *cmdline,
         int *pid,
         int *stdin_fd,
         int *stdout_fd,
@@ -103,12 +110,12 @@ static int do_fork_exec(const char *user,
             socketpair(AF_UNIX, SOCK_STREAM, 0, outpipe) ||
             (stderr_fd && socketpair(AF_UNIX, SOCK_STREAM, 0, errpipe)) ||
             socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, statuspipe)) {
-        perror("socketpair");
+        PERROR("socketpair");
         exit(1);
     }
     switch (*pid = fork()) {
         case -1:
-            perror("fork");
+            PERROR("fork");
             exit(-1);
         case 0: {
             int status;
@@ -202,7 +209,7 @@ struct qrexec_parsed_command {
     /* NULL if and only if we are the fork server.  Otherwise, a NUL-terminated string. */
     const char *const username;
     /* Command line.  Never NULL.  NUL-terminated. Does not include "QUBESRPC ". */
-    char *const command;
+    const char *const command;
     /* Service descriptor.  Identical to `command` unless the "nogui:" prefix is present, in which case it points
      * after the colon.  Always points to the start of the service name. */
     const char *service_descriptor;
@@ -237,7 +244,7 @@ static int find_qrexec_service_file(
         size_t path_length = (size_t)(path_end - path_start);
 
         if (path_length + service_descriptor_length + 1 >= buffer_size) {
-            fprintf(stderr, "find_qrexec_service_file: buffer too small for file path\n");
+            LOG(ERROR, "find_qrexec_service_file: buffer too small for file path");
             return -1;
         }
 
@@ -255,42 +262,49 @@ static int find_qrexec_service_file(
     return -1;
 }
 
-int execute_qubes_rpc_command(char *cmdline, int *pid, int *stdin_fd,
+int execute_qubes_rpc_command(const char *cmdline, int *pid, int *stdin_fd,
         int *stdout_fd, int *stderr_fd, bool strip_username, struct buffer *stdin_buffer) {
     const char *service_descriptor;
-    char *realcmd;
+    const char *realcmd;
     size_t service_descriptor_length;
-    const char *const username = strip_username ? cmdline : NULL;
-    {
-        if (strip_username) {
-            realcmd = strchr(cmdline, ':');
-            if (!realcmd) {
-                fputs("Bad command from dom0: no colon\n", stderr);
-                abort();
-            }
-            *realcmd++ = '\0';
-        } else {
-            realcmd = cmdline;
+    char *username = NULL;
+    int ret;
+
+    if (strip_username) {
+        realcmd = strchr(cmdline, ':');
+        if (!realcmd) {
+            LOG(ERROR, "Bad command from dom0: no colon");
+            abort();
         }
-        // Get the part of the command line that will be executed.
-        const char *const start_cmdline = skip_nogui(realcmd);
-        if (strncmp(start_cmdline, RPC_REQUEST_COMMAND " ", RPC_REQUEST_COMMAND_LEN + 1) != 0) {
-            // Legacy qrexec behavior: spawn shell directly.
-            return do_fork_exec(username, realcmd, pid, stdin_fd, stdout_fd, stderr_fd);
-        } else {
-            // Proper Qubes RPC call
-            service_descriptor = start_cmdline + RPC_REQUEST_COMMAND_LEN + 1;
+        username = strndup(cmdline, (size_t)(realcmd - cmdline));
+        if (!username) {
+            PERROR("strndup");
+            abort();
         }
+        realcmd++;
+    } else {
+        realcmd = cmdline;
     }
+
+    // Get the part of the command line that will be executed.
+    const char *const start_cmdline = skip_nogui(realcmd);
+    if (strncmp(start_cmdline, RPC_REQUEST_COMMAND " ", RPC_REQUEST_COMMAND_LEN + 1) != 0) {
+        // Legacy qrexec behavior: spawn shell directly.
+        return do_fork_exec(username, realcmd, pid, stdin_fd, stdout_fd, stderr_fd);
+    } else {
+        // Proper Qubes RPC call
+        service_descriptor = start_cmdline + RPC_REQUEST_COMMAND_LEN + 1;
+    }
+
     const char *const end_service_descriptor = strchr(service_descriptor, ' ');
     if (!end_service_descriptor) {
-        fputs("Bad command from dom0: no remote domain\n", stderr);
+        LOG(ERROR, "Bad command from dom0: no remote domain");
         abort();
     }
     service_descriptor_length = (size_t)(end_service_descriptor - service_descriptor);
     /* Check that the path is of a valid length */
     if (service_descriptor_length > MAX_SERVICE_NAME_LEN) {
-        fprintf(stderr, "Bad command from dom0: absurdly long command (length %zu)\n", service_descriptor_length);
+        LOG(ERROR, "Bad command from dom0: absurdly long command (length %zu)", service_descriptor_length);
         abort();
     }
     const struct qrexec_parsed_command command = {
@@ -299,7 +313,10 @@ int execute_qubes_rpc_command(char *cmdline, int *pid, int *stdin_fd,
        .service_descriptor = service_descriptor,
        .service_descriptor_length = service_descriptor_length,
     };
-    return execute_parsed_qubes_rpc_command(&command, pid, stdin_fd, stdout_fd, stderr_fd, stdin_buffer);
+    ret = execute_parsed_qubes_rpc_command(&command, pid, stdin_fd, stdout_fd, stderr_fd, stdin_buffer);
+    if (username)
+        free(username);
+    return ret;
 }
 
 static int execute_parsed_qubes_rpc_command(
@@ -310,11 +327,11 @@ static int execute_parsed_qubes_rpc_command(
         (size_t)(delimiter - command->service_descriptor) : command->service_descriptor_length;
 
     if (!service_length) {
-        fputs("Service path empty\n", stderr);
+        LOG(ERROR, "Service path empty");
         return -1;
     } else if (service_length > NAME_MAX) {
-        fprintf(stderr, "Service path too long to execute: %zu\n",
-                service_length);
+        LOG(ERROR, "Service path too long to execute: %zu",
+            service_length);
         return -1;
     }
 
@@ -346,9 +363,9 @@ static int execute_parsed_qubes_rpc_command(
             &statbuf);
     }
     if (ret < 0) {
-        fprintf(stderr, "Service not found: %.*s\n",
-                (int) command->service_descriptor_length,
-                command->service_descriptor);
+        LOG(ERROR, "Service not found: %.*s",
+            (int) command->service_descriptor_length,
+            command->service_descriptor);
         return -1;
     }
 
@@ -356,11 +373,11 @@ static int execute_parsed_qubes_rpc_command(
         /* Socket-based service. */
         int s;
         if ((s = socket(AF_UNIX, SOCK_STREAM, 0)) == -1) {
-            perror("socket");
+            PERROR("socket");
             return -1;
         }
         if (qubes_connect(s, service_full_path, strlen(service_full_path))) {
-            perror("qubes_connect");
+            PERROR("qubes_connect");
             close(s);
             return -1;
         }
@@ -385,8 +402,8 @@ static int execute_parsed_qubes_rpc_command(
                             pid, stdin_fd, stdout_fd, stderr_fd);
     }
 
-    fprintf(stderr, "Unknown service type (not executable, not a socket): %s\n",
-            service_full_path);
+    LOG(ERROR, "Unknown service type (not executable, not a socket): %s",
+        service_full_path);
     return -1;
 }
 // vim: set sw=4 ts=4 sts=4 et:
