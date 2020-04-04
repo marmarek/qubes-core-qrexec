@@ -78,7 +78,7 @@ Development header and files for qubes-qrexec
 %build
 %{?set_build_flags}
 export BACKEND_VMM=@BACKEND_VMM@
-make all-base
+make all-base PYTHON=%{__python3}
 #make -C doc PYTHON=%{__python3} SPHINXBUILD=sphinx-build-%{python3_version} man
 
 %install
