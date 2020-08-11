@@ -58,11 +58,6 @@ extensions = [
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ['_templates']
 
-import recommonmark.parser
-source_parsers = {
-    '.markdown': recommonmark.parser.CommonMarkParser,
-}
-
 # The suffix(es) of source filenames.
 # You can specify multiple suffix as a list of string:
 #
