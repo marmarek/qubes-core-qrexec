@@ -93,10 +93,8 @@ def parse_file(path, show=False, include_service=False):
                 if len(params) == 1:
                     (included_path,) = params
             elif directive == "!include-dir":
-                # Not implemented upstream, there is no example in
-                # qrexec/tests/policy_parser.py
-                lineno += 1
-                continue
+                if len(params) == 1:
+                    (included_path,) = params
 
         try:
             # Do not lint included path.
