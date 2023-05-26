@@ -81,6 +81,8 @@ def parse_file(path, show=False, include_service=False):
             lineno += 1
             continue
 
+        throw_exception = False
+        exception_msg = ''
         included_path = ''
         if line.startswith("!"):
             directive, *params = line.split()
@@ -93,10 +95,21 @@ def parse_file(path, show=False, include_service=False):
                 if len(params) == 1:
                     (included_path,) = params
             elif directive == "!include-dir":
-                if len(params) == 1:
-                    (included_path,) = params
+                if len(params) != 1:
+                    throw_exception = True
+                    exception_msg = "invalid number of params"
+                else:
+                    # Not implemented upstream, there is no example in
+                    # qrexec/tests/policy_parser.py
+                    lineno += 1
+                    continue
 
         try:
+            if throw_exception:
+                raise PolicySyntaxError(
+                    path, lineno, exception_msg
+                )
+
             # Do not lint included path.
             # But lint itself as an included service if specified by the user.
             if included_path != "":
