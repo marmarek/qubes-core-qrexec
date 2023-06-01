@@ -30,7 +30,7 @@ import subprocess
 import sys
 import tempfile
 from ..policy.admin_client import PolicyClient
-from .. import RPCNAME_ALLOWED_CHARSET
+from .. import RPCNAME_ALLOWED_CHARSET, POLICYPATH, INCLUDEPATH
 from ..client import VERSION
 
 
@@ -122,15 +122,30 @@ def main(args=None):
     if name.endswith(".policy"):
         name = name[:-7]
 
+    # Don't use policy(.include).List to support restricted AdminVMs. Instead,
+    # try to policy(.include).Get the file and if it fails because the file is
+    # not found, ignore, else abort as the request was refused.
     file_exists = False
     if is_include:
-        if name in client.policy_include_list():
+        try:
             original_content, token = client.policy_include_get(name)
             file_exists = True
+        except subprocess.CalledProcessError as e:
+            wanted_path = str(INCLUDEPATH) + "/" + name + "\n"
+            not_found = "Not found: " + wanted_path
+            if e.output.decode() != not_found:
+                print("Failed to get file: " + name)
+                sys.exit(1)
     else:
-        if name in client.policy_list():
+        try:
             original_content, token = client.policy_get(name)
             file_exists = True
+        except subprocess.CalledProcessError as e:
+            wanted_path = str(POLICYPATH) + "/" + name + ".policy\n"
+            not_found = "Not found: " + wanted_path
+            if e.output.decode() != not_found:
+                print("Failed to get file: " + name)
+                sys.exit(1)
 
     if is_include:
         tmpfile = tempfile.NamedTemporaryFile(suffix="_include_" + name)
@@ -150,10 +165,14 @@ def main(args=None):
         content = current_file.read()
         current_file.close()
 
-    if is_include:
-        client.policy_include_replace(name, content, token)
-    else:
-        client.policy_replace(name, content, token)
+    try:
+        if is_include:
+            client.policy_include_replace(name, content, token)
+        else:
+            client.policy_replace(name, content, token)
+    except subprocess.CalledProcessError as e:
+        print("Failed to replace file: " + name)
+        sys.exit(1)
 
     tmpfile.close()
 
