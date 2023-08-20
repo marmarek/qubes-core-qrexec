@@ -109,6 +109,8 @@ rm -f %{name}-%{version}
 %{_bindir}/qrexec-policy-restore
 %{_bindir}/qrexec-policy-daemon
 %{_bindir}/qubes-policy
+%{_bindir}/qubes-policy-lint
+%{_bindir}/qubes-policy-editor-cli
 %{_bindir}/qubes-policy-admin
 %{_bindir}/qrexec-policy
 
@@ -147,6 +149,8 @@ rm -f %{name}-%{version}
 %{python3_sitelib}/qrexec/tools/__pycache__/*
 %{python3_sitelib}/qrexec/tools/__init__.py
 %{python3_sitelib}/qrexec/tools/qubes_policy.py
+%{python3_sitelib}/qrexec/tools/qubes_policy_lint.py
+%{python3_sitelib}/qrexec/tools/qubes_policy_editor_cli.py
 %{python3_sitelib}/qrexec/tools/qubes_policy_admin.py
 %{python3_sitelib}/qrexec/tools/qrexec_policy_agent.py
 %{python3_sitelib}/qrexec/tools/qrexec_policy_exec.py
